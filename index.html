@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>Image Evolver</title>
+<style>
+
+  body {
+    background-color: #000;
+    color: #FFF;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin: 20px;
+    height: 100vh;
+    box-sizing: border-box;
+  }
+
+  .initial-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 60vh;
+  }
+
+  #viewerContainer {
+    display: flex; 
+    gap: 20px;     
+    margin-bottom: 20px;
+  }
+
+ 
+  .image-canvas {
+    border: 1px solid #FFF;
+    box-shadow: 0 0 10px rgba(255, 255, 255, 0.2);
+    image-rendering: pixelated;
+  }
+
+ 
+  #viewerContainer,
+  .stats-panel, 
+  .controls-panel {
+    display: none; 
+  }
+
+  .stats-panel {
+    gap: 30px;
+    margin-bottom: 20px;
+    font-size: 1.1em;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  .stat-item strong {
+    font-weight: 600;
+    margin-right: 5px;
+  }
+
+  .stat-value {
+    color: #AAA;
+  }
+
+  button {
+    background-color: #FFF;
+    color: #000;
+    border: none;
+    padding: 10px 20px;
+    cursor: pointer;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    transition: background-color 0.1s, color 0.1s;
+  }
+
+  button:hover {
+    background-color: #DDD;
+  }
+</style>
+</head>
+<body>
+
+  <div class="initial-state" id="initialState">
+    <h1>Image Genetic Evolver</h1>
+    <p>Upload image to begin the evolution process.</p>
+    <button id="uploadBtn">Upload Image</button>
+  </div>
+  
+  <div id="viewerContainer">
+    <div>
+        <h2>Original Image</h2>
+        <canvas id="originalCanvas" class="image-canvas"></canvas>
+    </div>
+    <div>
+        <h2>Evolution Frame</h2>
+        <canvas id="evolutionCanvas" class="image-canvas"></canvas>
+    </div>
+  </div>
+
+  <div class="stats-panel" id="statsPanel">
+    <div class="stat-item">
+      <strong>Splashes Painted:</strong>
+      <span id="splashCount" class="stat-value">0</span>
+    </div>
+    <div class="stat-item">
+      <strong>Iterations Sampled:</strong>
+      <span id="iterCount" class="stat-value">0</span>
+    </div>
+    <div class="stat-item">
+      <strong>Similarity:</strong>
+      <span id="simLabel" class="stat-value">0</span> %
+    </div>
+  </div>
+
+  <div class="controls-panel" id="controlsPanel">
+    <button id="toggleBtn">Pause</button>
+    <button id="replayBtn">Replay</button>
+    <button id="exportBtn">Export</button>
+    <button id="importBtn">Import</button>
+  </div>
+
+<script type="module">
+
+const evolutionCanvas = document.getElementById('evolutionCanvas');
+const originalCanvas = document.getElementById('originalCanvas');
+const uploadBtn = document.getElementById('uploadBtn');
+const initialStateDiv = document.getElementById('initialState');
+const statsPanel = document.getElementById('statsPanel');
+const controlsPanel = document.getElementById('controlsPanel');
+const viewerContainer = document.getElementById('viewerContainer'); 
+
+const toggleBtn = document.getElementById('toggleBtn');
+const replayBtn = document.getElementById('replayBtn');
+const exportBtn = document.getElementById('exportBtn');
+const importBtn = document.getElementById('importBtn');
+const splashCountLabel = document.getElementById('splashCount');
+const iterCountLabel = document.getElementById('iterCount');
+const simLabel = document.getElementById('simLabel');
+
+class Evolver {
+    constructor(originalImage) {
+        this.w = originalImage.width;
+        this.h = originalImage.height;
+        this.ctx = evolutionCanvas.getContext("2d", { alpha: false }); 
+        
+        //review from here i migjt add new code ***
+        this.running = true;
+        this.splashes = 0;
+        this.iterations = 0;
+        this.score = 0;
+        this.orgSum = 0;
+        this.history = [];
+
+        this.testData = null;
+        this.testDataD = null;
+        this.backupDataD = null;
+        this.orgDataD = null;
+
+        this.lastSimilarity = 0;
+        this.maxPower = 0;
+        this.updateInterval = null;
+
+ 
+        evolutionCanvas.width = this.w;
+        evolutionCanvas.height = this.h;
+        originalCanvas.width = this.w;
+        originalCanvas.height = this.h;
+
+
+        this._setupUI();
+        this._setupCanvases(originalImage);
+        this._calculateInitialScore();
+        this._setupListeners();
+
+        this.updateInterval = setInterval(() => this._updateStats(), 125);
+        this._startLoop();
+    }
+
+    _setupUI() {
+        initialStateDiv.style.display = 'none';
+        viewerContainer.style.display = 'flex'; 
+        statsPanel.style.display = 'flex';
+        controlsPanel.style.display = 'flex';
+    }
+
+    _setupCanvases(originalImage) {
+     
+        const orgViewCtx = originalCanvas.getContext("2d", { alpha: false });
+        orgViewCtx.drawImage(originalImage, 0, 0, this.w, this.h);
+
+    
+        this.ctx.fillStyle = "black";
+        this.ctx.fillRect(0, 0, this.w, this.h);
+
+
+        const orgCanvasInternal = document.createElement("canvas");
+        const orgCtxInternal = orgCanvasInternal.getContext("2d", { alpha: false });
+        orgCanvasInternal.width = this.w;
+        orgCanvasInternal.height = this.h;
+        orgCtxInternal.drawImage(originalImage, 0, 0, this.w, this.h);
+
+   
+        this.testData = this.ctx.getImageData(0, 0, this.w, this.h);
+        this.testDataD = this.testData.data;
+        
+        const backupData = new ImageData(this.w, this.h);
+        this.backupDataD = backupData.data;
+        this.backupDataD.set(this.testDataD);
+
+        const orgData = orgCtxInternal.getImageData(0, 0, this.w, this.h);
+        this.orgDataD = orgData.data;
+    }
+
+    _calculateInitialScore() {
+        for (let i = 0; i < this.w * this.h * 4; i += 4) {
+            this.orgSum += this.orgDataD[i + 0] + this.orgDataD[i + 1] + this.orgDataD[i + 2];
+        }
+    }
+
+    _setupListeners() {
+        toggleBtn.onclick = () => this.toggleRun();
+        replayBtn.onclick = () => this.replay();
+        exportBtn.onclick = () => this.exportData();
+        importBtn.onclick = () => this.importData();
+    }
+
+
+    _startLoop() {
+        const frame = () => {
+            if (this.running) {
+                const startTime = performance.now();
+                let foundImprovement = false;
+                
+                while (performance.now() - startTime <= 16 || !foundImprovement) {
+                    foundImprovement = this._iteration() || foundImprovement;
+                }
+          
+                this.ctx.putImageData(this.testData, 0, 0); 
+                iterCountLabel.innerText = this.iterations;
+                splashCountLabel.innerText = this.splashes;
+            }
+            requestAnimationFrame(frame);
+        };
+        requestAnimationFrame(frame);
+    }
+
+    _iteration() {
+        const entry = this._generateSplash();
+        this.iterations++;
+        
+        if (entry.impro > 0) {
+            this.backupDataD.set(this.testDataD);
+            this.splashes++;
+            this.score += entry.impro;
+            this.history.push(entry);
+            return true;
+        } else {
+            this.testDataD.set(this.backupDataD);
+            return false;
+        }
+    }
+
+    _generateSplash() {
+        const cx = Math.random() * this.w | 0;
+        const cy = Math.random() * this.h | 0;
+        const ra = (1 + Math.random() ** 2 * 128) | 0;
+        const r = Math.random() * 256 | 0;
+        const g = Math.random() * 256 | 0;
+        const b = Math.random() * 256 | 0;
+        const a = (1 + Math.random() * 255) / 255;
+        
+        const impro = this._drawSplash(cx, cy, ra, r, g, b, a, true);
+        return { cx, cy, ra, r, g, b, a, impro };
+    }
+
+    _drawSplash(cx, cy, ra, r, g, b, a, isTest) {
+        const nalpha = 1 - a;
+        let distSumBefore = 0;
+        let distSumAfter = 0;
+        const sx = Math.max(0, cx - ra);
+        const sy = Math.max(0, cy - ra);
+        const ex = Math.min(this.w, cx + ra);
+        const ey = Math.min(this.h, cy + ra);
+        
+        for (let y = sy; y < ey; y++) {
+            for (let x = sx; x < ex; x++) {
+                const d = Math.sqrt((x - cx) ** 2 + (y - cy) ** 2);
+                
+                if (d < ra) {
+                    const i = (x + y * this.w) * 4;
+                    let tr = this.testDataD[i + 0];
+                    let tg = this.testDataD[i + 1];
+                    let tb = this.testDataD[i + 2];
+                    
+                    if (isTest) {
+                        const or = this.orgDataD[i + 0];
+                        const og = this.orgDataD[i + 1];
+                        const ob = this.orgDataD[i + 2];
+                        
+                        distSumBefore += (
+                            Math.abs(or - tr) +
+                            Math.abs(og - tg) +
+                            Math.abs(ob - tb)
+                        );
+                    
+                        tr = this.testDataD[i + 0] = tr * nalpha + r * a | 0;
+                        tg = this.testDataD[i + 1] = tg * nalpha + g * a | 0;
+                        tb = this.testDataD[i + 2] = tb * nalpha + b * a | 0;
+
+                    
+                        distSumAfter += (
+                            Math.abs(or - tr) +
+                            Math.abs(og - tg) +
+                            Math.abs(ob - tb)
+                        );
+                    } else {
+                      
+                        this.testDataD[i + 0] = tr * nalpha + r * a | 0;
+                        this.testDataD[i + 1] = tg * nalpha + g * a | 0;
+                        this.testDataD[i + 2] = tb * nalpha + b * a | 0;
+                    }
+                }
+            }
+        }
+        
+        return isTest ? distSumBefore - distSumAfter : 0;
+    }
+
+    
+
+    toggleRun() {
+        this.running = !this.running;
+        toggleBtn.innerText = this.running ? "Pause" : "Continue";
+    }
+
+    replay() {
+        this._clearCanvas();
+        this.testData = this.ctx.getImageData(0, 0, this.w, this.h);
+        this.testDataD = this.testData.data;
+
+        let step = 0;
+        let frameImpro = 0;
+        
+        const replayFrame = () => {
+            while (step < this.history.length && frameImpro < 100_000) {
+                const entry = this.history[step];
+                this._drawSplash(entry.cx, entry.cy, entry.ra, entry.r, entry.g, entry.b, entry.a, false);
+                step++;
+                frameImpro += entry.impro;
+            }
+            
+            this.ctx.putImageData(this.testData, 0, 0);
+            splashCountLabel.innerText = step;
+            
+            if (step < this.history.length) {
+                requestAnimationFrame(replayFrame);
+            }
+        };
+
+        requestAnimationFrame(replayFrame);
+    }
+    
+    _clearCanvas() {
+        this.ctx.fillStyle = "black";
+        this.ctx.fillRect(0, 0, this.w, this.h);
+    }
+
+    exportData() {
+        const anchor = document.createElement("a");
+        const blob = new Blob([JSON.stringify(this.history)]);
+        anchor.href = URL.createObjectURL(blob);
+        anchor.download = "evolve-export.json";
+        anchor.click();
+    }
+
+    async importData() {
+        const input = document.createElement("input");
+        input.type = "file";
+        input.click();
+        await new Promise(res => input.onchange = res);
+        
+        const reader = new FileReader();
+        reader.readAsText(input.files[0]);
+        await new Promise(res => reader.onload = res);
+        
+        this.history = JSON.parse(reader.result);
+        this.replay();
+    }
+
+    _updateStats() {
+        const similarity = 100 * this.score / this.orgSum;
+        const simDiff = similarity - this.lastSimilarity;
+        this.lastSimilarity = similarity;
+        
+        let power = 0;
+        let tempDiff = simDiff;
+
+        while (tempDiff > 0 && tempDiff < 1) {
+            tempDiff *= 10;
+            power++;
+        }
+        
+        this.maxPower = Math.max(this.maxPower, power);
+        simLabel.innerText = similarity.toFixed(this.maxPower);
+    }
+}
+
+
+let evolverInstance = null;
+
+uploadBtn.addEventListener('click', () => {
+
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/*";
+    input.onchange = (e) => handleUpload(e.target.files[0]);
+    input.click();
+});
+
+function handleUpload(file) {
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+         
+            const MAX_SIZE = 800;
+            let width = img.width;
+            let height = img.height;
+
+            if (width > MAX_SIZE || height > MAX_SIZE) {
+                alert(`Image dimensions (${width}x${height}) are large. It will be resized to max ${MAX_SIZE}px for performance.`);
+                
+                if (width > height) {
+                    height *= MAX_SIZE / width;
+                    width = MAX_SIZE;
+                } else {
+                    width *= MAX_SIZE / height;
+                    height = MAX_SIZE;
+                }
+                width = Math.round(width);
+                height = Math.round(height);
+
+              
+                const tempCanvas = document.createElement('canvas');
+                const tempCtx = tempCanvas.getContext('2d');
+                tempCanvas.width = width;
+                tempCanvas.height = height;
+                tempCtx.drawImage(img, 0, 0, width, height);
+
+                const resizedImg = new Image();
+                resizedImg.onload = () => {
+                    if (evolverInstance) clearInterval(evolverInstance.updateInterval);
+                    evolverInstance = new Evolver(resizedImg);
+                };
+                resizedImg.src = tempCanvas.toDataURL();
+
+            } else {
+                if (evolverInstance) clearInterval(evolverInstance.updateInterval);
+                evolverInstance = new Evolver(img);
+            }
+        };
+        img.onerror = () => {
+            alert("Error loading image file.");
+        };
+        img.src = e.target.result;
+    };
+    reader.onerror = () => {
+        alert("Error reading file.");
+    };
+    reader.readAsDataURL(file);
+}
+</script>
+</body>
+</html>
